@@ -1,0 +1,411 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2820
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 Backend Structure:\
+\
+// Server.js\
+const express = require('express');\
+const mongoose = require('mongoose');\
+const cluster = require('cluster');\
+const os = require('os');\
+const \{ handleRequests \} = require('./loadBalancer');\
+\
+// Cluster setup for multi-core processing\
+if (cluster.isMaster) \{\
+  const numCPUs = os.cpus().length;\
+  for (let i = 0; i < numCPUs; i++) \{\
+    cluster.fork();\
+  \}\
+\} else \{\
+  const app = express();\
+  \
+  // Middleware\
+  app.use(express.json());\
+  app.use(cors());\
+  app.use(rateLimiter);\
+  \
+  // Routes\
+  app.use('/auth', authRoutes);\
+  app.use('/api/courses', courseRoutes);\
+  app.use('/api/electives', electiveRoutes);\
+  app.use('/api/admin', adminRoutes);\
+  \
+  // Database connection\
+  mongoose.connect(process.env.MONGODB_URI, \{ \
+    useNewUrlParser: true,\
+    useUnifiedTopology: true,\
+    retryWrites: true,\
+    w: 'majority'\
+  \});\
+  \
+  app.listen(3000, () => \{\
+    console.log(`Worker $\{process.pid\} listening on port 3000`);\
+  \});\
+\}\
+\
+// Load balancer logic\
+async function handleRequests(request) \{\
+  // Implement least-connection strategy\
+\}\
+\
+\
+Key features:\
+\
+async function allocateSeats() \{\
+  const students = await User.find(\{ role: 'student' \}).populate('preferences');\
+  const courses = await Course.find().lean();\
+\
+  students.forEach(student => \{\
+    student.preferences.forEach(preference => \{\
+      const electiveGroup = preference.electiveGroup;\
+      const priorityOrder = preference.priorityOrder;\
+      \
+      for (const courseId of priorityOrder) \{\
+        const course = courses.find(c => c._id.equals(courseId));\
+        if (course.seatsFilled < course.seats) \{\
+          enrollStudent(student, course);\
+          break;\
+        \} else \{\
+          addToWaitlist(student, course);\
+        \}\
+      \}\
+    \});\
+  \});\
+\}\
+\
+\
+Realtime updates with web socket:\
+\
+\
+// WebSocket server\
+const WebSocket = require('ws');\
+const wss = new WebSocket.Server(\{ port: 8080 \});\
+\
+wss.on('connection', (ws) => \{\
+  ws.on('message', (message) => \{\
+    const \{ action, courseId \} = JSON.parse(message);\
+    \
+    if (action === 'subscribe') \{\
+      const course = getCourse(courseId);\
+      ws.send(JSON.stringify(\{\
+        seatsAvailable: course.seats - course.seatsFilled,\
+        waitlistPosition: course.waitlist.length\
+      \}));\
+    \}\
+  \});\
+\});\
+\
+// Update clients when seats change\
+function broadcastSeatUpdate(courseId) \{\
+  const course = getCourse(courseId);\
+  wss.clients.forEach(client => \{\
+    if (client.isSubscribedTo(courseId)) \{\
+      client.send(JSON.stringify(\{\
+        seatsAvailable: course.seats - course.seatsFilled,\
+        waitlistPosition: course.waitlist.length\
+      \}));\
+    \}\
+  \});\
+\}\
+\
+\
+Scalability solutions :\
+\
+const redis = require('redis');\
+const client = redis.createClient();\
+\
+async function getCourses(req, res) \{\
+  const cacheKey = `courses:$\{req.user.branch\}:$\{req.user.semester\}`;\
+  \
+  redisClient.get(cacheKey, async (error, data) => \{\
+    if (data) \{\
+      return res.json(JSON.parse(data));\
+    \} else \{\
+      const courses = await Course.find(\{ \
+        branch: req.user.branch,\
+        semester: req.user.semester \
+      \});\
+      redisClient.setex(cacheKey, 3600, JSON.stringify(courses));\
+      res.json(courses);\
+    \}\
+  \});\
+\}\
+\
+\
+Modern frontend (react):\
+\
+// CourseSelection.jsx\
+import React, \{ useState, useEffect \} from 'react';\
+import \{ useWebSocket \} from 'react-use-websocket';\
+\
+const CourseSelection = () => \{\
+  const [preferences, setPreferences] = useState([]);\
+  const \{ lastMessage \} = useWebSocket('wss://yourserver.com/ws');\
+\
+  useEffect(() => \{\
+    if (lastMessage) \{\
+      const data = JSON.parse(lastMessage.data);\
+      updateSeatInfo(data);\
+    \}\
+  \}, [lastMessage]);\
+\
+  const handlePriorityChange = (electiveGroupId, newOrder) => \{\
+    setPreferences(prev => \
+      prev.map(p => \
+        p.electiveGroup === electiveGroupId \
+        ? \{ ...p, priorityOrder: newOrder \} \
+        : p\
+      )\
+    );\
+  \};\
+\
+  return (\
+    <div className="responsive-grid">\
+      \{electiveGroups.map(group => (\
+        <ElectiveGroup\
+          key=\{group._id\}\
+          group=\{group\}\
+          onPriorityChange=\{handlePriorityChange\}\
+          seatData=\{currentSeatInfo\}\
+        />\
+      ))\}\
+      <button onClick=\{submitPreferences\}>Submit Choices</button>\
+    </div>\
+  );\
+\};\
+\
+\
+Posgresql database schema:\
+\
+-- Tables\
+CREATE TABLE users (\
+    id SERIAL PRIMARY KEY,\
+    email VARCHAR(255) UNIQUE NOT NULL,\
+    password_hash TEXT NOT NULL,\
+    role VARCHAR(20) CHECK (role IN ('principal', 'hod', 'teacher', 'student')) NOT NULL,\
+    branch VARCHAR(50),\
+    department VARCHAR(50),\
+    semester INTEGER,\
+    division CHAR(1),\
+    created_at TIMESTAMP DEFAULT NOW()\
+);\
+\
+CREATE TABLE elective_groups (\
+    id SERIAL PRIMARY KEY,\
+    name VARCHAR(100) NOT NULL,\
+    branch VARCHAR(50) NOT NULL,\
+    semester INTEGER NOT NULL,\
+    required_credits INTEGER NOT NULL,\
+    created_at TIMESTAMP DEFAULT NOW()\
+);\
+\
+CREATE TABLE courses (\
+    id SERIAL PRIMARY KEY,\
+    code VARCHAR(20) UNIQUE NOT NULL,\
+    name VARCHAR(200) NOT NULL,\
+    description TEXT,\
+    branch VARCHAR(50) NOT NULL,\
+    semester INTEGER NOT NULL,\
+    elective_group_id INTEGER REFERENCES elective_groups(id),\
+    seats INTEGER NOT NULL,\
+    seats_filled INTEGER DEFAULT 0,\
+    schedule JSONB,\
+    teacher_id INTEGER REFERENCES users(id),\
+    syllabus TEXT[],\
+    created_at TIMESTAMP DEFAULT NOW()\
+);\
+\
+CREATE TABLE enrollments (\
+    id SERIAL PRIMARY KEY,\
+    student_id INTEGER REFERENCES users(id) NOT NULL,\
+    course_id INTEGER REFERENCES courses(id) NOT NULL,\
+    enrollment_type VARCHAR(10) CHECK (enrollment_type IN ('enrolled', 'waitlist')),\
+    priority INTEGER,\
+    created_at TIMESTAMP DEFAULT NOW(),\
+    UNIQUE(student_id, course_id)\
+);\
+\
+CREATE TABLE preferences (\
+    id SERIAL PRIMARY KEY,\
+    student_id INTEGER REFERENCES users(id) NOT NULL,\
+    elective_group_id INTEGER REFERENCES elective_groups(id) NOT NULL,\
+    course_order INTEGER[] NOT NULL,\
+    created_at TIMESTAMP DEFAULT NOW(),\
+    UNIQUE(student_id, elective_group_id)\
+);\
+\
+CREATE TABLE audit_logs (\
+    id SERIAL PRIMARY KEY,\
+    user_id INTEGER REFERENCES users(id),\
+    action VARCHAR(50) NOT NULL,\
+    target_type VARCHAR(50),\
+    target_id INTEGER,\
+    details JSONB,\
+    created_at TIMESTAMP DEFAULT NOW()\
+);\
+\
+\
+Authentication system:\
+\
+// Backend middleware/auth.js\
+const jwt = require('jsonwebtoken');\
+\
+const authenticate = (roles) => (req, res, next) => \{\
+    const token = req.header('Authorization')?.replace('Bearer ', '');\
+    if (!token) return res.status(401).send('Access denied');\
+\
+    try \{\
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);\
+        if (roles && !roles.includes(decoded.role)) \{\
+            return res.status(403).send('Forbidden');\
+        \}\
+        req.user = decoded;\
+        next();\
+    \} catch (err) \{\
+        res.status(401).send('Invalid token');\
+    \}\
+\};\
+\
+\
+\
+Login page :\
+\
+// Frontend/src/components/Login.jsx\
+import React, \{ useState \} from 'react';\
+import \{ useNavigate \} from 'react-router-dom';\
+\
+const Login = () => \{\
+    const [credentials, setCredentials] = useState(\{ email: '', password: '' \});\
+    const navigate = useNavigate();\
+\
+    const handleSubmit = async (e) => \{\
+        e.preventDefault();\
+        try \{\
+            const response = await fetch('/api/auth/login', \{\
+                method: 'POST',\
+                headers: \{ 'Content-Type': 'application/json' \},\
+                body: JSON.stringify(credentials)\
+            \});\
+            \
+            const data = await response.json();\
+            if (response.ok) \{\
+                localStorage.setItem('token', data.token);\
+                navigate(data.role === 'student' ? '/dashboard' : '/admin');\
+            \}\
+        \} catch (err) \{\
+            console.error('Login error:', err);\
+        \}\
+    \};\
+\
+    return (\
+        <div className="login-container">\
+            <form onSubmit=\{handleSubmit\}>\
+                <input\
+                    type="email"\
+                    placeholder="Email"\
+                    value=\{credentials.email\}\
+                    onChange=\{(e) => setCredentials(\{...credentials, email: e.target.value\})\}\
+                />\
+                <input\
+                    type="password"\
+                    placeholder="Password"\
+                    value=\{credentials.password\}\
+                    onChange=\{(e) => setCredentials(\{...credentials, password: e.target.value\})\}\
+                />\
+                <button type="submit">Login</button>\
+            </form>\
+        </div>\
+    );\
+\};\
+\
+\
+Hod panel view:\
+\
+// Course Management Component\
+const CourseManagement = () => \{\
+    const [courses, setCourses] = useState([]);\
+    \
+    useEffect(() => \{\
+        const fetchCourses = async () => \{\
+            const res = await fetch('/api/courses?branch=CS&semester=5');\
+            const data = await res.json();\
+            setCourses(data);\
+        \};\
+        fetchCourses();\
+    \}, []);\
+\
+    return (\
+        <div>\
+            <h2>Manage Courses</h2>\
+            <CourseTable \
+                courses=\{courses\}\
+                onEdit=\{handleEditCourse\}\
+                onAssignTeacher=\{handleAssignTeacher\}\
+            />\
+            <AddCourseForm onSubmit=\{handleAddCourse\} />\
+        </div>\
+    );\
+\};\
+\
+\
+Seat allocation algo:\
+-- PostgreSQL Function for Seat Allocation\
+CREATE OR REPLACE FUNCTION allocate_seats(elective_group_id INT)\
+RETURNS VOID AS $$\
+DECLARE\
+    student_record RECORD;\
+    course_record RECORD;\
+BEGIN\
+    FOR student_record IN \
+        SELECT * FROM preferences\
+        WHERE elective_group_id = $1\
+        ORDER BY created_at\
+    LOOP\
+        FOR i IN 1 .. array_length(student_record.course_order, 1)\
+        LOOP\
+            SELECT * INTO course_record \
+            FROM courses \
+            WHERE id = student_record.course_order[i]\
+            FOR UPDATE;\
+\
+            IF course_record.seats_filled < course_record.seats THEN\
+                INSERT INTO enrollments (student_id, course_id, enrollment_type)\
+                VALUES (student_record.student_id, course_record.id, 'enrolled');\
+                \
+                UPDATE courses \
+                SET seats_filled = seats_filled + 1\
+                WHERE id = course_record.id;\
+                \
+                EXIT;\
+            ELSE\
+                INSERT INTO enrollments (student_id, course_id, enrollment_type)\
+                VALUES (student_record.student_id, course_record.id, 'waitlist');\
+            END IF;\
+        END LOOP;\
+    END LOOP;\
+END;\
+$$ LANGUAGE plpgsql;\
+\
+\
+Scalability solutions:\
+\
+// Caching middleware\
+const cache = (req, res, next) => \{\
+    const key = req.originalUrl;\
+    redisClient.get(key, (err, data) => \{\
+        if (data) \{\
+            res.send(JSON.parse(data));\
+        \} else \{\
+            res.sendResponse = res.send;\
+            res.send = (body) => \{\
+                redisClient.setex(key, 3600, body);\
+                res.sendResponse(body);\
+            \};\
+            next();\
+        \}\
+    \});\
+\};}
